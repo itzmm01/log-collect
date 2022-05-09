@@ -3,19 +3,19 @@ logs:
     namespace: default
     pod: mvlog-server
     name: wemeet-center
-    dir: /data/spp_mvlog_server/data/wemeet_center/
+    dir: /data/spp_mvlog_server/data/wemeet_center
     file: wemeet_center_trpc.log 
   - type: k8s
     namespace: default
     pod: mvlog-server
     name: wemeet-conn
-    dir: /data/spp_mvlog_server/data/wemeet-conn/
+    dir: /data/spp_mvlog_server/data/wemeet-conn
     file: wemeet_conn_trpc.log
   - type: k8s
     namespace: default
     pod: mvlog-server
     name: wemeet-xmpp
-    dir: /data/spp_mvlog_server/data/wemeet-xmpp/
+    dir: /data/spp_mvlog_server/data/wemeet-xmpp
     file: wemeet_xmpp_trpc.log
   - type: k8s
     namespace: default
