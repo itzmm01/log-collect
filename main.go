@@ -132,8 +132,16 @@ func getLogNameList(conf Config, name string) Log {
 	}
 	return Log{}
 }
-func checkFileLink() {
-
+func checkFileLink(pod, dir string, conf Log) string {
+	// cmdStr := fmt.Sprintf("ls -ld %v|grep '^l'", dir)
+	cmdStr := fmt.Sprintf("kubectl -n %v exec -i %v -- bash -c \" ls -ld %v|grep '^l'\" ", conf.NS, pod, dir)
+	result, err := Run(cmdStr)
+	if err != nil {
+		return dir
+	}
+	dirList := strings.Split(result, " ")
+	dirLink := dirList[len(dirList)-1]
+	return dirLink
 }
 func getAllPod(conf Log) []string {
 	cmdStr := fmt.Sprintf("kubectl -n %v get pod |grep '%v'|awk '{print $1}'", conf.NS, conf.Pod)
@@ -161,7 +169,8 @@ func fetchLogFile(conf Log, arg Args) {
 	}
 	podNameList := getAllPod(conf)
 	for _, podName := range podNameList {
-		logFilePath := conf.Dir + "/" + conf.File
+		logDir := checkFileLink(podName, conf.Dir, conf)
+		logFilePath := logDir + "/" + conf.File
 		if checkSpace(conf, arg, logFilePath, podName) {
 			cmdStr := fmt.Sprintf("kubectl -n %v cp %v:%v %v/%v.log", conf.NS, podName, logFilePath, destDir, podName)
 			if _, err := Run(cmdStr); err != nil {
