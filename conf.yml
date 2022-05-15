@@ -1,37 +1,21 @@
+host: 
+  test1:
+    user: root
+    port: 22
+    password: xxx
+    ips:
+    - ip: xxx
+
 logs:
+  - type: ssh
+    name: test
+    dir: /var/l[a-z]{1,}g
+    file: y[a-z]{1,}.log
+    hostgroup: test1
   - type: k8s
     namespace: default
-    pod: mvlog-server
-    name: wemeet-center
-    dir: /data/spp_mvlog_server/data/wemeet_center
-    file: wemeet_center_trpc.log 
-  - type: k8s
-    namespace: default
-    pod: mvlog-server
-    name: wemeet-conn
-    dir: /data/spp_mvlog_server/data/wemeet-conn
-    file: wemeet_conn_trpc.log
-  - type: k8s
-    namespace: default
-    pod: mvlog-server
-    name: wemeet-xmpp
-    dir: /data/spp_mvlog_server/data/wemeet-xmpp
-    file: wemeet_xmpp_trpc.log
-  - type: k8s
-    namespace: default
-    pod: wemeet-cmlb
-    name: cmlb_agent
-    dir:  /home/oicq/cmlb_agent/log
-    file:  
-  - type: k8s
-    namespace: default
-    pod: wemeet-cmlb
-    name: cmlb_cc
-    dir:  /home/oicq/cmlb_cc/log
-    file:  
-  - type: k8s
-    namespace: default
-    pod: media-signal
-    name: logic
-    dir:  /data/log/ilvb_logic
-    file:  
+    pod: serviceinit-tool
+    container: 
+    name: test2
+    dir:  /var/l[a-z]{1,}g
+    file: y[a-z]{1,}.log
