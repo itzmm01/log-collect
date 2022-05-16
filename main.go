@@ -97,18 +97,18 @@ func (ctx Log) GetLogHost(conf Config) []HostInfo {
 	}
 	return ctx.HostInfo
 }
-func (ctx Log) GetAllPod() {
+func (ctx Log) GetAllPod() []string {
 	cmdStr := fmt.Sprintf("kubectl -n %v get pod |grep '%v'|awk '{print $1}'", ctx.NS, ctx.Pod)
 	result, err := tools.Run(cmdStr)
 	if err != nil {
 		ctx.podNameList = []string{}
 	}
 	ctx.podNameList = strings.Split(result, "\n")
+	return ctx.podNameList
 }
 
 func (ctx Log) checkFileLink(dir, pod string, host HostInfo) string {
 	cmdStr := fmt.Sprintf("ls -ld %v|grep '^l'", dir)
-
 	if ctx.Type == "k8s" {
 		k8sCmdStr := fmt.Sprintf("kubectl -n %v exec -i %v -- bash -c \" %v \" ", ctx.NS, pod, cmdStr)
 		result, err := tools.Run(k8sCmdStr)
@@ -147,8 +147,7 @@ func tarFIle(src, dest string) {
 	}
 }
 func (ctx Log) K8sFile(arg Args, destDir string) {
-	ctx.GetAllPod()
-	for _, podName := range ctx.podNameList {
+	for _, podName := range ctx.GetAllPod() {
 		var err error
 		newDir := ""
 		if newDir, err = ctx.regToRealDir(podName, HostInfo{}); err != nil {
@@ -161,10 +160,10 @@ func (ctx Log) K8sFile(arg Args, destDir string) {
 		}
 
 		logPath := newDir + newFilePath
-		logFilePath := ctx.checkFileLink(podName, logPath, ctx.HostInfo[0])
+		logFilePath := ctx.checkFileLink(logPath, podName, HostInfo{})
 
+		log.Printf("[INFO] Download %v - %v", logFilePath, fmt.Sprintf("%v/%v.log", destDir, podName))
 		if ctx.checkSpace(arg, ctx.File, podName, HostInfo{}) {
-			log.Printf("[INFO] Download %v - %v", logFilePath, fmt.Sprintf("%v/%v.log", destDir, podName))
 			cmdStr := fmt.Sprintf("kubectl -n %v cp %v:%v %v/%v.log", ctx.NS, podName, logFilePath, destDir, podName)
 			if _, err := tools.Run(cmdStr); err != nil {
 				log.Println("ERROR: fetch log ", podName, logFilePath)
