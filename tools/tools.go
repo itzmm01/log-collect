@@ -3,6 +3,7 @@ package tools
 import (
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -50,7 +51,7 @@ func Strip(s_ string, chars_ string) string {
 	return string(s[start : end+1])
 }
 
-// Run
+// Run cmd
 func Run(command string) (string, error) {
 	var result []byte
 	var err error
@@ -78,7 +79,7 @@ func Run(command string) (string, error) {
 	return resultFormat, err
 }
 
-// ConvertByte2String
+// ConvertByte2String Solve Chinese garbled code
 func ConvertByte2String(byte []byte, charset Charset) string {
 	var str string
 	switch charset {
@@ -93,9 +94,8 @@ func ConvertByte2String(byte []byte, charset Charset) string {
 	return str
 }
 func CurDiskInfo(path string) []string {
-	_, err := Run("mkdir -p " + path)
-	if err != nil {
-		log.Fatalln("[ERROR] get disk info failed")
+	if _, err := Mkdir(path); err != nil {
+		log.Fatalln("[ERROR] get cur disk  info failed")
 	}
 	cmdStr := "df  " + path + "|awk 'NR>1{print $2,$3}'"
 	result, err := Run(cmdStr)
@@ -113,4 +113,24 @@ type NewError struct {
 //NewError Error() 方法的对象都可以
 func (e *NewError) Error() string {
 	return e.Msg
+}
+
+func PathExists(path string) bool {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true
+	}
+	if os.IsNotExist(err) {
+		return false
+	}
+	return false
+}
+
+func Mkdir(path string) (bool, error) {
+	err := os.MkdirAll(path, 0755)
+	if err != nil {
+		return false, err
+	} else {
+		return true, nil
+	}
 }

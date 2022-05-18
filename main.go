@@ -1,17 +1,31 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"log"
+	"log-collect/k8s"
 	"log-collect/ssh"
 	"log-collect/tools"
 	"os"
+	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v2"
+	metaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+var (
+	clientSet  *kubernetes.Clientset
+	kubeConfig *rest.Config
+)
+
+const sysType = runtime.GOOS
 
 type Args struct {
 	Mode   *string
@@ -98,20 +112,27 @@ func (ctx Log) GetLogHost(conf Config) []HostInfo {
 	return ctx.HostInfo
 }
 func (ctx Log) GetAllPod() []string {
-	cmdStr := fmt.Sprintf("kubectl -n %v get pod |grep '%v'|awk '{print $1}'", ctx.NS, ctx.Pod)
-	result, err := tools.Run(cmdStr)
+	pods, err := clientSet.CoreV1().Pods(ctx.NS).List(context.TODO(), metaV1.ListOptions{})
 	if err != nil {
-		ctx.podNameList = []string{}
+		log.Fatalln(err)
 	}
-	ctx.podNameList = strings.Split(result, "\n")
+	for _, pod := range pods.Items {
+		reg1 := regexp.MustCompile(fmt.Sprintf("^%v", ctx.Pod))
+		if reg1 == nil {
+			log.Fatalln("Regular expression error: ", fmt.Sprintf("^%v", ctx.Pod))
+		}
+		podMatch := reg1.FindAllStringSubmatch(pod.Name, -1)
+		if len(podMatch) > 0 {
+			ctx.podNameList = append(ctx.podNameList, pod.Name)
+		}
+	}
 	return ctx.podNameList
 }
 
 func (ctx Log) checkFileLink(dir, pod string, host HostInfo) string {
 	cmdStr := fmt.Sprintf("ls -ld %v|grep '^l'", dir)
 	if ctx.Type == "k8s" {
-		k8sCmdStr := fmt.Sprintf("kubectl -n %v exec -i %v -- bash -c \" %v \" ", ctx.NS, pod, cmdStr)
-		result, err := tools.Run(k8sCmdStr)
+		result, err := k8s.Exec(kubeConfig, clientSet, pod, ctx.NS, cmdStr)
 		if err != nil {
 			return dir
 		}
@@ -146,6 +167,25 @@ func tarFIle(src, dest string) {
 		log.Fatalln("[ERROR] zip log ", err)
 	}
 }
+func initK8sClient() {
+	var err error
+	// 实例化 k8s 客户端
+	kubeConfig, err = k8s.InitKubeConfig(false)
+	if err != nil {
+		log.Fatalf("ERROR: %s", err)
+	}
+	clientSet, err = k8s.NewClientSet(kubeConfig)
+	if err != nil {
+		log.Fatalf("ERROR: %s", err)
+	}
+}
+func (ctx Log) k8sCopy(pod, src, dest string) {
+	err := k8s.CopyFromPod(kubeConfig, clientSet, pod, ctx.NS, src, dest)
+	if err != nil {
+		log.Printf("ERROR: %s", err)
+	}
+
+}
 func (ctx Log) K8sFile(arg Args, destDir string) {
 	for _, podName := range ctx.GetAllPod() {
 		var err error
@@ -163,11 +203,8 @@ func (ctx Log) K8sFile(arg Args, destDir string) {
 		logFilePath := ctx.checkFileLink(logPath, podName, HostInfo{})
 
 		log.Printf("[INFO] Download %v - %v", logFilePath, fmt.Sprintf("%v/%v.log", destDir, podName))
-		if ctx.checkSpace(arg, ctx.File, podName, HostInfo{}) {
-			cmdStr := fmt.Sprintf("kubectl -n %v cp %v:%v %v/%v.log", ctx.NS, podName, logFilePath, destDir, podName)
-			if _, err := tools.Run(cmdStr); err != nil {
-				log.Println("ERROR: fetch log ", podName, logFilePath)
-			}
+		if ctx.checkSpace(arg, logFilePath, podName, HostInfo{}) {
+			ctx.k8sCopy(podName, logFilePath, destDir)
 		} else {
 			log.Println("ERROR: disk + logfile must < 85%")
 		}
@@ -188,10 +225,9 @@ func (ctx Log) SSHFile(arg Args, destDir string) {
 		}
 
 		logPath := newDir + newFilePath
-
 		logFilePath := ctx.checkFileLink(logPath, "", host)
 
-		if ctx.checkSpace(arg, ctx.File, "", host) {
+		if ctx.checkSpace(arg, logFilePath, "", host) {
 			cli := ssh.SSH{
 				Host:     host.IP,
 				Port:     int64(host.Port),
@@ -215,10 +251,11 @@ func (ctx Log) SSHFile(arg Args, destDir string) {
 func (ctx Log) fetchLogFile(arg Args) {
 	// kubectl -n sso cp mariadb-sso-test-ss-0:/workspace/agent  ./agent
 	destDir := fmt.Sprintf("%v/%v", *arg.LogDir, ctx.Name)
-	if _, err := tools.Run("mkdir -p " + destDir); err != nil {
+	if _, err := tools.Mkdir(destDir); err != nil {
 		log.Fatalln(err)
 	}
 	if ctx.Type == "k8s" {
+		initK8sClient()
 		ctx.K8sFile(arg, destDir)
 	} else if ctx.Type == "ssh" {
 		ctx.SSHFile(arg, destDir)
@@ -254,14 +291,19 @@ func (ctx Log) getFileSize(namespace, logfile, pod string, host HostInfo) string
 }
 
 func (ctx Log) checkSpace(arg Args, logfile, pod string, host HostInfo) bool {
+
+	if sysType == "windows" {
+		log.Println("This check is not supported. Please make your own judgment")
+		return true
+	}
 	var result string
 	var err error
 	cmdStr := fmt.Sprintf("du -k %v|awk '{print \\$1}'", logfile)
-	k8sCmdStr := fmt.Sprintf("kubectl -n %v exec -i %v -- bash -c \"%v\" ", ctx.NS, pod, cmdStr)
 	if ctx.Type == "k8s" {
-		result, err = tools.Run(k8sCmdStr)
+		cmdStr1 := fmt.Sprintf("du -k %v|awk '{print $1}'", logfile)
+		result, err = k8s.Exec(kubeConfig, clientSet, pod, ctx.NS, cmdStr1)
 		if err != nil {
-			log.Fatalln("get disk info failed")
+			log.Fatalln("[ERROR] get disk info failed", cmdStr1, err)
 		}
 	} else {
 		cli := ssh.SSH{
@@ -290,6 +332,9 @@ func (ctx Log) checkSpace(arg Args, logfile, pod string, host HostInfo) bool {
 }
 
 func (ctx Log) regToRealDir(pod string, host HostInfo) (string, error) {
+	if ctx.Dir == "/" {
+		return ctx.Dir, nil
+	}
 	pathList := strings.Split(ctx.Dir, "/")
 	path := ""
 	for index, reg := range pathList {
@@ -300,8 +345,7 @@ func (ctx Log) regToRealDir(pod string, host HostInfo) (string, error) {
 			var result string
 			var err error
 			if ctx.Type == "k8s" {
-				podCmdStr := fmt.Sprintf("kubectl -n %v exec -i %v -- bash -c \"%v\" ", ctx.NS, pod, cmdStr)
-				result, err = tools.Run(podCmdStr)
+				result, err = k8s.Exec(kubeConfig, clientSet, pod, ctx.NS, cmdStr)
 			} else {
 				cli := ssh.SSH{
 					Host:     host.IP,
@@ -330,8 +374,12 @@ func (ctx Log) regToRealFile(oldPath, pod string, host HostInfo) (string, error)
 	var err error
 	cmdStr := fmt.Sprintf("ls %v |grep -P '%v$'", oldPath, ctx.File)
 	if ctx.Type == "k8s" {
-		podCmdStr := fmt.Sprintf("kubectl -n %v exec -i %v -- bash -c \"%v\" ", ctx.NS, pod, cmdStr)
-		result, err = tools.Run(podCmdStr)
+		result, err = k8s.Exec(kubeConfig, clientSet, pod, ctx.NS, cmdStr)
+		if err != nil {
+			return "", &tools.NewError{Msg: fmt.Sprintf(cmdStr, result, err)}
+		} else {
+			return tools.Strip(result, "\n"), nil
+		}
 	} else {
 		cli := ssh.SSH{
 			Host:     host.IP,
@@ -342,16 +390,14 @@ func (ctx Log) regToRealFile(oldPath, pod string, host HostInfo) (string, error)
 		}
 		cli.CreateClient()
 		result, err = cli.RunShell(cmdStr)
+		if err != nil {
+			return "", &tools.NewError{Msg: fmt.Sprintf(cmdStr, result, err)}
+		} else {
+			dirPath := strings.Split(result, "\n")
+			path = dirPath[len(dirPath)-1]
+			return path, nil
+		}
 	}
-
-	if err != nil {
-		return "", &tools.NewError{Msg: "not found " + ctx.File}
-	} else {
-		dirPath := strings.Split(result, "\n")
-		path = dirPath[len(dirPath)-1]
-	}
-
-	return path, nil
 }
 
 func main() {
