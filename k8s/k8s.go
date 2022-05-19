@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"log-collect/tools"
 	"os"
 	"path"
@@ -370,6 +371,7 @@ func Exec(r *rest.Config, c *kubernetes.Clientset, podName, namespace, cmd strin
 	// 执行命令
 	executor, err := remotecommand.NewSPDYExecutor(r, "POST", req.URL())
 	if err != nil {
+		log.Println(namespace, podName, cmd, err)
 		return "", err
 	}
 	// 使用bytes.Buffer变量接收标准输出和标准错误

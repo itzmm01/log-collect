@@ -156,7 +156,6 @@ func (ctx Log) checkFileLink(dir, pod string, host HostInfo) string {
 		dirLink := dirList[len(dirList)-1]
 		return dirLink
 	}
-
 	return dir
 
 }
@@ -179,24 +178,19 @@ func initK8sClient() {
 		log.Fatalf("ERROR: %s", err)
 	}
 }
-func (ctx Log) k8sCopy(pod, src, dest string) {
-	err := k8s.CopyFromPod(kubeConfig, clientSet, pod, ctx.NS, src, dest)
-	if err != nil {
-		log.Printf("ERROR: %s", err)
-	}
 
-}
 func (ctx Log) K8sFile(arg Args, destDir string) {
 	for _, podName := range ctx.GetAllPod() {
 		var err error
 		newDir := ""
 		if newDir, err = ctx.regToRealDir(podName, HostInfo{}); err != nil {
-			log.Fatalln("ERROR: ", err)
+			log.Fatalln("[ERROR] ", err)
 		}
 
 		newFilePath := ""
 		if newFilePath, err = ctx.regToRealFile(newDir, podName, HostInfo{}); err != nil {
-			log.Fatalln("ERROR: ", newFilePath, ctx.File, err)
+			log.Println()
+			log.Fatalln("[ERROR] ", newDir, ctx.File, err)
 		}
 
 		logPath := newDir + newFilePath
@@ -204,7 +198,10 @@ func (ctx Log) K8sFile(arg Args, destDir string) {
 
 		log.Printf("[INFO] Download %v - %v", logFilePath, fmt.Sprintf("%v/%v.log", destDir, podName))
 		if ctx.checkSpace(arg, logFilePath, podName, HostInfo{}) {
-			ctx.k8sCopy(podName, logFilePath, destDir)
+			err := k8s.CopyFromPod(kubeConfig, clientSet, podName, ctx.NS, logFilePath, destDir)
+			if err != nil {
+				log.Printf("ERROR: %s", err)
+			}
 		} else {
 			log.Println("ERROR: disk + logfile must < 85%")
 		}
@@ -346,6 +343,7 @@ func (ctx Log) regToRealDir(pod string, host HostInfo) (string, error) {
 			var err error
 			if ctx.Type == "k8s" {
 				result, err = k8s.Exec(kubeConfig, clientSet, pod, ctx.NS, cmdStr)
+				path = path + tools.Strip(result, "\n") + "/"
 			} else {
 				cli := ssh.SSH{
 					Host:     host.IP,
@@ -356,12 +354,11 @@ func (ctx Log) regToRealDir(pod string, host HostInfo) (string, error) {
 				}
 				cli.CreateClient()
 				result, err = cli.RunShell(cmdStr)
+				dirPath := strings.Split(result, "\n")
+				path = path + dirPath[len(dirPath)-1] + "/"
 			}
 			if err != nil {
 				return "", &tools.NewError{Msg: "not found " + reg}
-			} else {
-				dirPath := strings.Split(result, "\n")
-				path = path + dirPath[len(dirPath)-1] + "/"
 			}
 		}
 	}

@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -71,11 +70,7 @@ func Run(command string) (string, error) {
 		log.Println(command)
 	}
 
-	if err != nil {
-		msg := fmt.Sprintf("ERROR: cmd(%v), err(%v)", command, ConvertByte2String(result, "GB18030"))
-		log.Println(msg)
-	}
-	resultFormat := Strip(string(result), "\n")
+	resultFormat := Strip(ConvertByte2String(result, "GB18030"), "\n")
 	return resultFormat, err
 }
 

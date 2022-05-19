@@ -2,20 +2,20 @@ host:
   test1:
     user: root
     port: 22
-    password: xxx
+    password: Amt_2018
     ips:
-    - ip: xxx
+    - ip: 192.168.126.201
 
 logs:
   - type: ssh
     name: test
-    dir: /var/l[a-z]{1,}g
-    file: y[a-z]{1,}.log
+    dir: /root
+    file: 1.log
     hostgroup: test1
   - type: k8s
     namespace: default
-    pod: serviceinit-tool
+    pod: hello-world
     container: 
     name: test2
-    dir:  /var/l[a-z]{1,}g
-    file: y[a-z]{1,}.log
+    dir:  /
+    file: 1.log
