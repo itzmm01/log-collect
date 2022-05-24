@@ -24,6 +24,54 @@ Usage of log-collect:
         log name
 ```
 
+## 配置文件
+
+`host.yml`
+
+```yaml
+test:
+  - ip: x.x.x.x
+    user: root
+    port: 22
+    password: xxx
+  - ip: x.x.x.x
+    user: root
+    port: 22
+    password: xxx
+```
+
+`conf.yml`
+
+```yaml
+logs:
+# 主机日志
+  - type: ssh
+# 日志名
+    name: test
+# 日志存放目录
+    dir: /root
+# 日志文件名，为空的话拉取整个目录
+    file: "naviacat*.zip"
+# 指定主机组
+    hostgroup: test
+    
+# pod日志
+  - type: k8s
+# 日志名
+    name: test2
+# 命名空间
+    namespace: default
+# pod名使用关键字即可, 例如: hello-world-3c82s hello-world-z5fgs 填写hello-world即可
+    pod: hello-world
+
+# 日志存放目录
+    dir: /var/log
+# 日志文件名，为空的话拉取整个目录
+    file: "yum*"
+```
+
+
+
 ## 示例
 
 ```bash
