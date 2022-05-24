@@ -208,8 +208,8 @@ func (ctx Log) K8sFile(arg Args, destDir string) {
 			log.Fatalln("[ERROR] ", newDir, ctx.File, err)
 		}
 
-		logPath := newDir + newFilePath
-		logFilePath := ctx.checkFileLink(logPath, podName, HostInfo{})
+		//logPath := newDir + newFilePath
+		logFilePath := ctx.checkFileLink(newFilePath, podName, HostInfo{})
 
 		log.Printf("[INFO] Download %v - %v", logFilePath, fmt.Sprintf("%v/%v.log", destDir, podName))
 		if ctx.checkSpace(arg, logFilePath, podName, HostInfo{}) {
@@ -372,7 +372,7 @@ func (ctx Log) regToRealDir(pod string, host HostInfo) (string, error) {
 			var err error
 			if ctx.Type == "k8s" {
 				result, err = k8s.Exec(kubeConfig, clientSet, pod, ctx.NS, cmdStr)
-				path = path + tools.Strip(result, "\n") + "/"
+				path = tools.Strip(result, "\n")
 			} else {
 				cli := ssh.SSH{
 					Host:     host.IP,
