@@ -5,15 +5,9 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"github.com/juju/ratelimit"
 	"io"
 	"io/ioutil"
-	"log"
-	"log-collect/tools"
-	"os"
-	"path"
-	"path/filepath"
-	"strings"
-
 	coreV1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -21,6 +15,13 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/remotecommand"
 	cmdUtil "k8s.io/kubectl/pkg/cmd/util"
+	"log"
+	"log-collect/tools"
+	"os"
+	"path"
+	"path/filepath"
+	"strings"
+	"time"
 )
 
 var (
@@ -161,6 +162,7 @@ func unTarAll(reader io.Reader, destDir, prefix string) error {
 				return err
 			}
 			defer outFile.Close()
+
 			if _, err := io.Copy(outFile, tarReader); err != nil {
 				return err
 			}
@@ -173,11 +175,20 @@ func unTarAll(reader io.Reader, destDir, prefix string) error {
 }
 
 // unTarAll1 4K per read
-func unTarAll1(reader io.Reader, destDir, prefix string) error {
+func unTarAll1(reader io.Reader, destDir string, limit int) error {
 	buf := bufio.NewReader(reader)
-	outFile, _ := os.Create(destDir + ".tar.gz")
+	outFile, _ := os.Create(destDir)
 	w := bufio.NewWriter(outFile)
-	s := make([]byte, 4096)
+	s := make([]byte, 40960)
+
+	// Bucket adding limit MB every second, limit MB
+	bucket := ratelimit.NewBucketWithRate(float64(limit*1024000), int64(limit*1024000))
+	if limit == 0 {
+		// max 10G ~= unlimited
+		bucket = ratelimit.NewBucketWithRate(10000*1024000, 10000*1024000)
+	}
+
+	start := time.Now()
 	for {
 		_, err := buf.Read(s)
 		if err != nil {
@@ -186,8 +197,10 @@ func unTarAll1(reader io.Reader, destDir, prefix string) error {
 			}
 			break
 		}
-		w.Write(s)
+		// Copy source to destination, but wrap our reader with rate limited one
+		io.Copy(w, ratelimit.Reader(reader, bucket))
 	}
+	log.Println("Copied in ", time.Since(start))
 	defer outFile.Close()
 	return nil
 }
@@ -233,7 +246,7 @@ func CopyFromPod(r *rest.Config, c *kubernetes.Clientset, pod, ns, src, dest str
 	prefix = stripPathShortcuts(prefix)
 	destPath := path.Join(dest, pod+path.Base(prefix))
 
-	err = unTarAll1(reader, destPath, prefix)
+	err = tools.LimitDownload(reader, destPath)
 	return nil
 }
 

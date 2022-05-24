@@ -1,21 +1,13 @@
-host: 
-  test1:
-    user: root
-    port: 22
-    password: Amt_2018
-    ips:
-    - ip: 192.168.126.201
-
 logs:
   - type: ssh
     name: test
     dir: /root
-    file: 1.log
-    hostgroup: test1
+    file: "naviacat12.zip"
+    hostgroup: test
   - type: k8s
     namespace: default
     pod: hello-world
     container: 
     name: test2
-    dir:  /
-    file: 1.log
+    dir: /
+    file: naviacat12.zip

@@ -3,7 +3,7 @@
 name="log-collect"
 
 build(){
-	go build -o $name main.go 
+	go build -a -ldflags="-s -w -extldflags='static'" -o $name main.go 
 	chmod 755 $name
 	mkdir ./$name-$GOOS-$GOARCH 
 	mv $name ./$name-$GOOS-$GOARCH 

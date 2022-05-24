@@ -42,7 +42,7 @@ func publicKeyAuthFunc(keyPath string) ssh.AuthMethod {
 }
 
 // CreateClient Create SSH Client
-func (cliConf *SSH) CreateClient() {
+func (ctx *SSH) CreateClient() {
 	var (
 		sshClient  *ssh.Client
 		sftpClient *sftp.Client
@@ -50,54 +50,54 @@ func (cliConf *SSH) CreateClient() {
 	)
 
 	config := ssh.ClientConfig{
-		User: cliConf.Username,
+		User: ctx.Username,
 		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 			return nil
 		},
 		Timeout: 10 * time.Second,
 	}
-	if cliConf.KeyFile == "" {
-		config.Auth = []ssh.AuthMethod{ssh.Password(cliConf.Password)}
+	if ctx.KeyFile == "" {
+		config.Auth = []ssh.AuthMethod{ssh.Password(ctx.Password)}
 	} else {
-		config.Auth = []ssh.AuthMethod{publicKeyAuthFunc(cliConf.KeyFile)}
+		config.Auth = []ssh.AuthMethod{publicKeyAuthFunc(ctx.KeyFile)}
 	}
-	addr := fmt.Sprintf("%s:%d", cliConf.Host, cliConf.Port)
+	addr := fmt.Sprintf("%s:%d", ctx.Host, ctx.Port)
 
 	if sshClient, err = ssh.Dial("tcp", addr, &config); err != nil {
-		log.Println("[ERROR] error occurred:", err)
+		log.Println("[ERROR] connect host failed:", err)
 	}
-	cliConf.sshClient = sshClient
+	ctx.sshClient = sshClient
 
 	//此时获取了sshClient，下面使用sshClient构建sftpClient
 	if sftpClient, err = sftp.NewClient(sshClient); err != nil {
 		log.Println("[ERROR] error occurred:", err)
 	}
-	cliConf.sftpClient = sftpClient
+	ctx.sftpClient = sftpClient
 }
 
 // RunShell Run cmd
-func (cliConf *SSH) RunShell(shell string) (res string, error1 error) {
+func (ctx *SSH) RunShell(shell string) (res string, error1 error) {
 	var (
 		session *ssh.Session
 		err     error
 	)
 	//获取session，这个session是用来远程执行操作的
-	if session, err = cliConf.sshClient.NewSession(); err != nil {
+	if session, err = ctx.sshClient.NewSession(); err != nil {
 		return "", err
 	}
 	//执行shell
 	if output, err := session.CombinedOutput(shell); err != nil {
 		return "", err
 	} else {
-		cliConf.LastResult = tools.Strip(string(output), "\n")
+		ctx.LastResult = tools.Strip(string(output), "\n")
 	}
-	return cliConf.LastResult, nil
+	return ctx.LastResult, nil
 }
 
 // Upload Upload file
-func (cliConf *SSH) Upload(srcPath, dstPath string) error {
-	srcFile, _ := os.Open(srcPath)                   //本地
-	dstFile, _ := cliConf.sftpClient.Create(dstPath) //远程
+func (ctx *SSH) Upload(srcPath, dstPath string) error {
+	srcFile, _ := os.Open(srcPath)               //本地
+	dstFile, _ := ctx.sftpClient.Create(dstPath) //远程
 	defer func() {
 		_ = srcFile.Close()
 		_ = dstFile.Close()
@@ -118,7 +118,7 @@ func (cliConf *SSH) Upload(srcPath, dstPath string) error {
 }
 
 // UploadDirectory Upload Directory
-func (cliConf *SSH) UploadDirectory(srcDir, dstPath string) error {
+func (ctx *SSH) UploadDirectory(srcDir, dstPath string) error {
 	srcFiles, err := ioutil.ReadDir(srcDir)
 	if err != nil {
 		return err
@@ -127,46 +127,49 @@ func (cliConf *SSH) UploadDirectory(srcDir, dstPath string) error {
 		srcFilePath := path.Join(srcDir, backupDir.Name())
 		dstFilePath := path.Join(dstPath, backupDir.Name())
 		if backupDir.IsDir() {
-			cliConf.sftpClient.Mkdir(dstFilePath)
-			cliConf.UploadDirectory(srcFilePath, dstFilePath)
+			ctx.sftpClient.Mkdir(dstFilePath)
+			ctx.UploadDirectory(srcFilePath, dstFilePath)
 		} else {
-			cliConf.Upload(srcFilePath, dstFilePath)
+			ctx.Upload(srcFilePath, dstFilePath)
 		}
 	}
 	return nil
 }
 
 // Download file
-func (cliConf *SSH) Download(srcPath, dstPath string) error {
-	srcFile, _ := cliConf.sftpClient.Open(srcPath) //远程
-	dstFile, _ := os.Create(dstPath)               //本地
-	defer func() {
-		_ = srcFile.Close()
-		_ = dstFile.Close()
-	}()
-
-	if _, err := srcFile.WriteTo(dstFile); err != nil {
-		return err
+func (ctx *SSH) Download(srcPath, dstPath string) error {
+	fileObj, _ := ctx.sftpClient.Stat(srcPath)
+	if fileObj.IsDir() {
+		err := ctx.DownloadDirectory(srcPath, dstPath)
+		if err != nil {
+			return err
+		}
+	} else {
+		srcFile, _ := ctx.sftpClient.Open(srcPath) //远程
+		err := tools.LimitDownload(srcFile, dstPath)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 // DownloadDirectory Download Directory
-func (cliConf *SSH) DownloadDirectory(srcPath, dstPath string) error {
-	w := cliConf.sftpClient.Walk(srcPath)
+func (ctx *SSH) DownloadDirectory(srcPath, dstPath string) error {
+	w := ctx.sftpClient.Walk(srcPath)
 	for w.Step() {
 		if w.Err() != nil {
 			continue
 		}
 		fileName := strings.Split(w.Path(), srcPath)
-		stat, _ := cliConf.sftpClient.Stat(w.Path())
+		stat, _ := ctx.sftpClient.Stat(w.Path())
 		if stat.IsDir() {
 			err := os.MkdirAll(dstPath+fileName[len(fileName)-1], 0755)
 			if err != nil {
 				return err
 			}
 		} else {
-			err := cliConf.Download(w.Path(), dstPath+fileName[len(fileName)-1])
+			err := ctx.Download(w.Path(), dstPath+fileName[len(fileName)-1])
 			if err != nil {
 				return err
 			}
@@ -177,6 +180,6 @@ func (cliConf *SSH) DownloadDirectory(srcPath, dstPath string) error {
 }
 
 // Delete delete remote file
-func (cliConf *SSH) Delete(filePath string) error {
-	return cliConf.sftpClient.Remove(filePath)
+func (ctx *SSH) Delete(filePath string) error {
+	return ctx.sftpClient.Remove(filePath)
 }

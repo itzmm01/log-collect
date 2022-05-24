@@ -3,6 +3,7 @@ module log-collect
 go 1.17
 
 require (
+	github.com/juju/ratelimit v1.0.1
 	github.com/pkg/sftp v1.13.4
 	golang.org/x/crypto v0.0.0-20220511200225-c6db032c6c88
 	golang.org/x/text v0.3.7
