@@ -440,7 +440,7 @@ func (ctx Log) regToRealFile(oldPath, pod string, host HostInfo) (string, error)
 func main() {
 	arg := Args{}
 
-	arg.Mode = flag.String("m", "", "list all log name")
+	arg.Mode = flag.String("m", "", "mode: list/get")
 	arg.Name = flag.String("n", "", "log name")
 	arg.LogDir = flag.String("d", "/tmp/logs", "dest logs dir")
 	arg.HostYaml = flag.String("i", "./host.yml", "host.yml")

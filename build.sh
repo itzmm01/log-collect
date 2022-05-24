@@ -22,3 +22,7 @@ echo $name-$GOOS-$GOARCH
 build
 
 
+# arm64
+export GOARCH=arm64
+echo $name-$GOOS-$GOARCH
+build
