@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v2"
 	metaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -43,6 +44,7 @@ type Log struct {
 	Name        string `yaml:"name"`
 	Dir         string `yaml:"dir"`
 	File        string `yaml:"file"`
+	Container   string `yaml:"container"`
 	HostGroup   string `yaml:"hostgroup"`
 	Host        string `yaml:"host"`
 	HostInfo    []HostInfo
@@ -64,6 +66,7 @@ type HostGroup struct {
 type Config struct {
 	HostGroups map[string]HostGroup `yaml:"host"`
 	Logs       []Log                `yaml:"logs"`
+	Debug      bool                 `yaml:"debug"`
 }
 
 func ReadYamlConfig(path string) (*Config, error) {
@@ -151,15 +154,15 @@ func (ctx Log) GetAllPod() []string {
 }
 
 func (ctx Log) checkFileLink(dir, pod string, host HostInfo) string {
-	cmdStr := fmt.Sprintf("ls -ld %v|grep '^l'", dir)
+	cmdStr := fmt.Sprintf("ls -ld /%v|grep '^l'", tools.Strip(dir, "/"))
 	if ctx.Type == "k8s" {
-		result, err := k8s.Exec(kubeConfig, clientSet, pod, ctx.NS, cmdStr)
+		result, err := k8s.Exec(kubeConfig, clientSet, pod, ctx.NS, cmdStr, ctx.Container)
 		if err != nil {
 			return dir
 		}
 		dirList := strings.Split(result, " ")
 		dirLink := dirList[len(dirList)-1]
-		return dirLink
+		return tools.Strip(dirLink, "\n")
 	} else if ctx.Type == "ssh" {
 		cli := ssh.SSH{
 			Host:     host.IP,
@@ -200,7 +203,7 @@ func (ctx Log) K8sFile(arg Args, destDir string) {
 		var err error
 		newDir := ""
 		if newDir, err = ctx.regToRealDir(podName, HostInfo{}); err != nil {
-			log.Fatalln("[ERROR] ", err)
+			log.Fatalln("[ERROR] ", podName, err)
 		}
 
 		newFilePath := ""
@@ -213,7 +216,7 @@ func (ctx Log) K8sFile(arg Args, destDir string) {
 
 		log.Printf("[INFO] Download %v - %v", logFilePath, fmt.Sprintf("%v/%v.log", destDir, podName))
 		if ctx.checkSpace(arg, logFilePath, podName, HostInfo{}) {
-			err := k8s.CopyFromPod(kubeConfig, clientSet, podName, ctx.NS, logFilePath, destDir)
+			err := k8s.CopyFromPod(kubeConfig, clientSet, podName, ctx.NS, logFilePath, destDir, ctx.Container)
 			if err != nil {
 				log.Printf("ERROR: %s", err)
 			}
@@ -276,7 +279,7 @@ func (ctx Log) fetchLogFile(arg Args) {
 	} else if ctx.Type == "ssh" {
 		ctx.SSHFile(arg, destDir)
 	}
-
+	time.Sleep(2000 * time.Millisecond)
 	err := tools.Compress([]string{destDir}, destDir+".tar.gz")
 	if err != nil {
 		log.Fatalln(err)
@@ -323,7 +326,7 @@ func (ctx Log) checkSpace(arg Args, logfile, pod string, host HostInfo) bool {
 	cmdStr := fmt.Sprintf("du -k %v|awk '{print \\$1}'", logfile)
 	if ctx.Type == "k8s" {
 		cmdStr1 := fmt.Sprintf("du -k %v|awk '{print $1}'", logfile)
-		result, err = k8s.Exec(kubeConfig, clientSet, pod, ctx.NS, cmdStr1)
+		result, err = k8s.Exec(kubeConfig, clientSet, pod, ctx.NS, cmdStr1, ctx.Container)
 		if err != nil {
 			log.Fatalln("[ERROR] get disk info failed", cmdStr1, err)
 		}
@@ -370,8 +373,11 @@ func (ctx Log) regToRealDir(pod string, host HostInfo) (string, error) {
 			cmdStr := fmt.Sprintf("ls -d %v/%v", path, reg)
 			var result string
 			var err error
+			if tools.DEBUG {
+				log.Println(cmdStr)
+			}
 			if ctx.Type == "k8s" {
-				result, err = k8s.Exec(kubeConfig, clientSet, pod, ctx.NS, cmdStr)
+				result, err = k8s.Exec(kubeConfig, clientSet, pod, ctx.NS, cmdStr, ctx.Container)
 				path = tools.Strip(result, "\n")
 			} else {
 				cli := ssh.SSH{
@@ -391,7 +397,7 @@ func (ctx Log) regToRealDir(pod string, host HostInfo) (string, error) {
 				path = dirPath[len(dirPath)-1]
 			}
 			if err != nil {
-				return "", &tools.NewError{Msg: "not found " + reg}
+				return "", &tools.NewError{Msg: "[ERROR] " + reg + ":" + err.Error()}
 			}
 		}
 	}
@@ -411,7 +417,7 @@ func (ctx Log) regToRealFile(oldPath, pod string, host HostInfo) (string, error)
 	}
 
 	if ctx.Type == "k8s" {
-		result, err = k8s.Exec(kubeConfig, clientSet, pod, ctx.NS, cmdStr)
+		result, err = k8s.Exec(kubeConfig, clientSet, pod, ctx.NS, cmdStr, ctx.Container)
 		if err != nil {
 			return "", &tools.NewError{Msg: fmt.Sprintf(cmdStr, result, err)}
 		} else {
@@ -441,7 +447,7 @@ func main() {
 	arg := Args{}
 
 	arg.Mode = flag.String("m", "", "mode: list/get")
-	arg.Name = flag.String("n", "", "log name")
+	arg.Name = flag.String("n", "", "log name (log1,log2)")
 	arg.LogDir = flag.String("d", "/tmp/logs", "dest logs dir")
 	arg.HostYaml = flag.String("i", "./host.yml", "host.yml")
 	arg.Debug = flag.Bool("debug", false, "debug")
@@ -452,19 +458,22 @@ func main() {
 	tools.DEBUG = *arg.Debug
 	tools.Limit = *arg.Limit
 	conf, err := ReadYamlConfig("conf.yml")
-
 	if err != nil {
 		log.Fatal(err)
 	}
 	if *arg.Mode == "get" {
-		logInfo := conf.getLogNameList(*arg.Name)
-		if logInfo.Name == "" {
-			log.Println("not found log: ", *arg.Name)
-		} else {
-			conf.HostGroups = conf.ReadHost(*arg.HostYaml)
-			conf.UpdateHosts()
-			logInfo.HostInfo = logInfo.GetLogHost(*conf)
-			logInfo.fetchLogFile(arg)
+		logList := strings.Split(*arg.Name, ",")
+
+		for _, logName := range logList {
+			logInfo := conf.getLogNameList(logName)
+			if logInfo.Name == "" {
+				log.Println("not found log: ", logName)
+			} else {
+				conf.HostGroups = conf.ReadHost(*arg.HostYaml)
+				conf.UpdateHosts()
+				logInfo.HostInfo = logInfo.GetLogHost(*conf)
+				logInfo.fetchLogFile(arg)
+			}
 		}
 
 	} else if *arg.Mode == "list" {

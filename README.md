@@ -1,4 +1,8 @@
-## 参数
+# **日志拉取工具**
+
+
+
+## **参数**
 
 
 
@@ -19,14 +23,18 @@ Usage of log-collect:
 # 模式： list-列出支持的日志名称 get-拉起日志    (必要参数)
   -m string
         mode: list/get
-# 指定拉起日志名,配合 -m get 使用
+# 指定拉起日志名,配合 -m get 使用,同时拉起多个日志用`,`隔开
   -n string
-        log name
+        log name （log1,log2,log3）
 ```
 
-## 配置文件
 
-`host.yml`
+
+## **配置文件**
+
+host.yml
+
+
 
 ```yaml
 test:
@@ -38,9 +46,18 @@ test:
     user: root
     port: 22
     password: xxx
+test2:
+  - ip: x.x.x.x
+    user: root
+    port: 22
+    password: xxx
 ```
 
-`conf.yml`
+
+
+conf.yml
+
+
 
 ```yaml
 logs:
@@ -72,7 +89,11 @@ logs:
 
 
 
-## 示例
+
+
+## **示例**
+
+
 
 ```bash
 # 列出所有日志
@@ -83,6 +104,3 @@ logs:
 # 2022/05/09 18:26:15 main.go:175: INFO logfile path: /tmp/logs/wemeet-center.tar.gz
 ./log-collect -m get -n test -limit 5
 ```
-
-
-

@@ -206,7 +206,7 @@ func unTarAll1(reader io.Reader, destDir string, limit int) error {
 }
 
 // CopyFromPod 从 pod 复制文件到本地
-func CopyFromPod(r *rest.Config, c *kubernetes.Clientset, pod, ns, src, dest string) error {
+func CopyFromPod(r *rest.Config, c *kubernetes.Clientset, pod, ns, src, dest, container string) error {
 	reader, outStream := io.Pipe()
 
 	// 初始化pod所在的 coreV1 资源组，发送请求
@@ -216,12 +216,13 @@ func CopyFromPod(r *rest.Config, c *kubernetes.Clientset, pod, ns, src, dest str
 		Namespace(ns).
 		SubResource("exec").
 		VersionedParams(&coreV1.PodExecOptions{
+			Stdin:     true,
+			Stdout:    true,
+			Stderr:    true,
+			TTY:       false,
+			Container: container,
 			// 将数据转换成数据流
 			Command: []string{"tar", "cPf", "-", src},
-			Stdin:   true,
-			Stdout:  true,
-			Stderr:  true,
-			TTY:     false,
 		}, scheme.ParameterCodec)
 
 	// remote-command 主要实现了http 转 SPDY 添加X-Stream-Protocol-Version相关header 并发送请求
@@ -366,8 +367,7 @@ func recursiveTar(srcBase, srcFile, destBase, destFile string, tw *tar.Writer) e
 	}
 	return nil
 }
-func Exec(r *rest.Config, c *kubernetes.Clientset, podName, namespace, cmd string) (string, error) {
-
+func Exec(r *rest.Config, c *kubernetes.Clientset, podName, namespace, cmd, container string) (string, error) {
 	// 构造执行命令请求
 	req := c.CoreV1().RESTClient().Post().
 		Resource("pods").
@@ -375,11 +375,12 @@ func Exec(r *rest.Config, c *kubernetes.Clientset, podName, namespace, cmd strin
 		Namespace(namespace).
 		SubResource("exec").
 		VersionedParams(&coreV1.PodExecOptions{
-			Command: []string{"sh", "-c", cmd},
-			Stdin:   true,
-			Stdout:  true,
-			Stderr:  true,
-			TTY:     false,
+			Container: container,
+			Command:   []string{"sh", "-c", cmd},
+			Stdin:     true,
+			Stdout:    true,
+			Stderr:    true,
+			TTY:       false,
 		}, scheme.ParameterCodec)
 	// 执行命令
 	executor, err := remotecommand.NewSPDYExecutor(r, "POST", req.URL())
@@ -396,6 +397,9 @@ func Exec(r *rest.Config, c *kubernetes.Clientset, podName, namespace, cmd strin
 	}); err != nil {
 		return stderr.String(), err
 	}
-
-	return stdout.String(), nil
+	result := stdout.String()
+	if tools.DEBUG {
+		log.Println(cmd, result)
+	}
+	return result, nil
 }

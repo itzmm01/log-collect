@@ -1,3 +1,4 @@
+debug: true
 logs:
   - type: ssh
     name: test
