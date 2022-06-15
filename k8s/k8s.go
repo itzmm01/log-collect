@@ -222,7 +222,7 @@ func CopyFromPod(r *rest.Config, c *kubernetes.Clientset, pod, ns, src, dest, co
 			TTY:       false,
 			Container: container,
 			// 将数据转换成数据流
-			Command: []string{"tar", "cPf", "-", src},
+			Command: []string{"tar", "cPf", "--warning=no-file-changed", "-", src},
 		}, scheme.ParameterCodec)
 
 	// remote-command 主要实现了http 转 SPDY 添加X-Stream-Protocol-Version相关header 并发送请求
