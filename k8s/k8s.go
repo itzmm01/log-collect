@@ -265,8 +265,13 @@ func CopyFromPod(r *rest.Config, c *kubernetes.Clientset, pod, ns, src, dest, co
 	prefix = path.Clean(prefix)
 	prefix = stripPathShortcuts(prefix)
 	destPath := path.Join(dest, fileName)
-
-	err = tools.LimitDownload(reader, destPath+".tar.gz")
+	var destFile string
+	if cmd[0] == "cat" {
+		destFile = destPath + ".log"
+	} else {
+		destFile = destPath + ".tar.gz"
+	}
+	err = tools.LimitDownload(reader, destFile)
 	if err != nil {
 		return err
 	}
