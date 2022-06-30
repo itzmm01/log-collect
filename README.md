@@ -80,11 +80,21 @@ logs:
     namespace: default
 # pod名使用关键字即可, 例如: hello-world-3c82s hello-world-z5fgs 填写hello-world即可
     pod: hello-world
-
 # 日志存放目录
     dir: /var/log
-# 日志文件名，为空的话拉取整个目录
+# 日志文件名,为空的话拉取整个目录,如果pod中没有tar命令则必须指定文件名
     file: "yum*"
+    
+# pod日志,kubectl logs拉取
+  - type: kubectl_logs
+# 日志名
+    name: test2
+# 命名空间
+    namespace: default
+# pod名使用关键字即可, 例如: hello-world-3c82s hello-world-z5fgs 填写hello-world即可
+    pod: hello-world
+# 获取num行日志
+    num: 500
 ```
 
 

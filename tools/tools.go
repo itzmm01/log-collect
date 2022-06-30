@@ -3,8 +3,7 @@ package tools
 import (
 	"archive/tar"
 	"compress/gzip"
-	"github.com/juju/ratelimit"
-	"golang.org/x/text/encoding/simplifiedchinese"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -14,6 +13,9 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/juju/ratelimit"
+	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
 type Charset string
@@ -74,7 +76,7 @@ func Run(command string) (string, error) {
 	}
 
 	if DEBUG {
-		log.Println(command)
+		log.Println(command, string(result))
 	}
 
 	resultFormat := Strip(ConvertByte2String(result, "GB18030"), "\n")
@@ -139,7 +141,6 @@ func Mkdir(path string) (bool, error) {
 
 func LimitDownload(reader io.Reader, destDir string) error {
 	dstFile, _ := os.Create(destDir)
-
 	var bucket *ratelimit.Bucket
 	if Limit == 0 {
 		// max 10G ~= unlimited
@@ -152,7 +153,6 @@ func LimitDownload(reader io.Reader, destDir string) error {
 	if err != nil {
 		return err
 	}
-
 	defer func() {
 		_ = dstFile.Close()
 	}()
@@ -276,4 +276,32 @@ func createFile(name string) (*os.File, error) {
 		return nil, err
 	}
 	return os.Create(name)
+}
+
+func KubectlLogs(ns, podPreFix, container, num, destDir string) error {
+	getPodCmd := fmt.Sprintf("kubectl -n %s get pod|grep '%s'|awk '{print $1}'", ns, podPreFix)
+	allPodStr, err := Run(getPodCmd)
+	if err != nil {
+		return &NewError{Msg: allPodStr}
+	}
+	if allPodStr == "" {
+		return &NewError{Msg: "Pod not found"}
+	}
+	podList := strings.Split(allPodStr, "\n")
+	for _, pod := range podList {
+		destFile := fmt.Sprintf("%s/%s-pod.log", destDir, pod)
+		log.Println(fmt.Sprintf("[INFO] Download %s to %s ", pod, destFile))
+		var cmd string
+		if container != "" {
+			cmd = fmt.Sprintf("kubectl -n %s logs --tail %s %s -c %s > %s", ns, num, pod, container, destFile)
+		} else {
+			cmd = fmt.Sprintf("kubectl -n %s logs --tail %s %s > %s", ns, num, pod, destFile)
+		}
+		_, err := Run(cmd)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

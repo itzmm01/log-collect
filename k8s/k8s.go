@@ -5,16 +5,8 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"github.com/juju/ratelimit"
 	"io"
 	"io/ioutil"
-	coreV1 "k8s.io/api/core/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/tools/remotecommand"
-	cmdUtil "k8s.io/kubectl/pkg/cmd/util"
 	"log"
 	"log-collect/tools"
 	"os"
@@ -22,6 +14,15 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/juju/ratelimit"
+	coreV1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/remotecommand"
+	cmdUtil "k8s.io/kubectl/pkg/cmd/util"
 )
 
 var (
@@ -206,9 +207,25 @@ func unTarAll1(reader io.Reader, destDir string, limit int) error {
 }
 
 // CopyFromPod 从 pod 复制文件到本地
-func CopyFromPod(r *rest.Config, c *kubernetes.Clientset, pod, ns, src, dest, container string) error {
+func CopyFromPod(r *rest.Config, c *kubernetes.Clientset, pod, ns, src, dest, container, fileName string, isTar bool) error {
 	reader, outStream := io.Pipe()
 
+	var cmd []string
+	if isTar {
+		cmd = []string{"tar", "cf", "-", src, "--warning=no-file-changed"}
+	} else {
+		logFileList := strings.Split(src, "/")
+		if logFileList[len(logFileList)-1] == "" {
+			cmd := "ls " + src
+			res, err := Exec(r, c, pod, ns, cmd, container)
+			if err != nil {
+				return &tools.NewError{Msg: res}
+			}
+			msg := "There is no tar command in the container. Directories are not supported: " + src
+			return &tools.NewError{Msg: msg}
+		}
+		cmd = []string{"cat", src}
+	}
 	// 初始化pod所在的 coreV1 资源组，发送请求
 	req := c.CoreV1().RESTClient().Get().
 		Resource("pods").
@@ -222,7 +239,7 @@ func CopyFromPod(r *rest.Config, c *kubernetes.Clientset, pod, ns, src, dest, co
 			TTY:       false,
 			Container: container,
 			// 将数据转换成数据流
-			Command: []string{"tar", "cPf", "--warning=no-file-changed", "-", src},
+			Command: cmd,
 		}, scheme.ParameterCodec)
 
 	// remote-command 主要实现了http 转 SPDY 添加X-Stream-Protocol-Version相关header 并发送请求
@@ -230,24 +247,30 @@ func CopyFromPod(r *rest.Config, c *kubernetes.Clientset, pod, ns, src, dest, co
 	if err != nil {
 		return err
 	}
-
 	go func() {
 		defer outStream.Close()
+		var errStream bytes.Buffer
 		err = exec.Stream(remotecommand.StreamOptions{
 			Stdin:  os.Stdin,
 			Stdout: outStream,
-			Stderr: os.Stderr,
+			Stderr: &errStream,
 			Tty:    false,
 		})
-		cmdUtil.CheckErr(err)
+		if err != nil {
+			log.Println("[ERROR]: ", errStream.String())
+		}
 	}()
 
 	prefix := getPrefix(src)
 	prefix = path.Clean(prefix)
 	prefix = stripPathShortcuts(prefix)
-	destPath := path.Join(dest, pod+path.Base(prefix))
+	destPath := path.Join(dest, fileName)
 
 	err = tools.LimitDownload(reader, destPath+".tar.gz")
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 

@@ -4,8 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 	"log"
 	"log-collect/k8s"
 	"log-collect/ssh"
@@ -16,7 +14,9 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"time"
+
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 
 	"gopkg.in/yaml.v2"
 	metaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -47,6 +47,7 @@ type Log struct {
 	Container   string `yaml:"container"`
 	HostGroup   string `yaml:"hostgroup"`
 	Host        string `yaml:"host"`
+	Num         string `yaml:"num"`
 	HostInfo    []HostInfo
 	podNameList []string
 }
@@ -138,7 +139,7 @@ func (ctx Log) GetLogHost(conf Config) []HostInfo {
 func (ctx Log) GetAllPod() []string {
 	pods, err := clientSet.CoreV1().Pods(ctx.NS).List(context.TODO(), metaV1.ListOptions{})
 	if err != nil {
-		log.Fatalln(err)
+		log.Fatalln("get pod error ", err)
 	}
 	for _, pod := range pods.Items {
 		reg1 := regexp.MustCompile(fmt.Sprintf("^%v", ctx.Pod))
@@ -153,16 +154,16 @@ func (ctx Log) GetAllPod() []string {
 	return ctx.podNameList
 }
 
-func (ctx Log) checkFileLink(dir, pod string, host HostInfo) string {
+func (ctx Log) checkFileLink(dir, pod string, host HostInfo) (error, string) {
 	cmdStr := fmt.Sprintf("ls -ld /%v|grep '^l'", tools.Strip(dir, "/"))
 	if ctx.Type == "k8s" {
 		result, err := k8s.Exec(kubeConfig, clientSet, pod, ctx.NS, cmdStr, ctx.Container)
 		if err != nil {
-			return dir
+			return err, dir
 		}
 		dirList := strings.Split(result, " ")
 		dirLink := dirList[len(dirList)-1]
-		return tools.Strip(dirLink, "\n")
+		return nil, tools.Strip(dirLink, "\n")
 	} else if ctx.Type == "ssh" {
 		cli := ssh.SSH{
 			Host:     host.IP,
@@ -175,13 +176,13 @@ func (ctx Log) checkFileLink(dir, pod string, host HostInfo) string {
 		result, err := cli.RunShell(cmdStr)
 
 		if err != nil {
-			return dir
+			return err, dir
 		}
 		dirList := strings.Split(result, " ")
 		dirLink := dirList[len(dirList)-1]
-		return dirLink
+		return nil, dirLink
 	}
-	return dir
+	return nil, dir
 
 }
 
@@ -197,7 +198,16 @@ func initK8sClient() {
 		log.Fatalf("ERROR: %s", err)
 	}
 }
-
+func CheckTarCmd(pod, ns, container string) bool {
+	cmd := "tar --version|grep 'GNU tar'"
+	res, err := k8s.Exec(kubeConfig, clientSet, pod, ns, cmd, container)
+	if err != nil {
+		log.Println("[WARN] Tar command not found cat will be used: " + res)
+		return false
+	} else {
+		return true
+	}
+}
 func (ctx Log) K8sFile(arg Args, destDir string) {
 	for _, podName := range ctx.GetAllPod() {
 		var err error
@@ -205,23 +215,37 @@ func (ctx Log) K8sFile(arg Args, destDir string) {
 		if newDir, err = ctx.regToRealDir(podName, HostInfo{}); err != nil {
 			log.Fatalln("[ERROR] ", podName, err)
 		}
-
-		newFilePath := ""
-		if newFilePath, err = ctx.regToRealFile(newDir, podName, HostInfo{}); err != nil {
+		newFilePathStr := ""
+		if newFilePathStr, err = ctx.regToRealFile(newDir, podName, HostInfo{}); err != nil {
 			log.Fatalln("[ERROR] ", newDir, ctx.File, err)
 		}
-
-		//logPath := newDir + newFilePath
-		logFilePath := ctx.checkFileLink(newFilePath, podName, HostInfo{})
-
-		log.Printf("[INFO] Download %v - %v", logFilePath, fmt.Sprintf("%v/%v.log", destDir, podName))
-		if ctx.checkSpace(arg, logFilePath, podName, HostInfo{}) {
-			err := k8s.CopyFromPod(kubeConfig, clientSet, podName, ctx.NS, logFilePath, destDir, ctx.Container)
-			if err != nil {
-				log.Printf("ERROR: %s", err)
+		newFilePathList := strings.Split(newFilePathStr, "\n")
+		for _, newFilePath := range newFilePathList {
+			err, logFilePath := ctx.checkFileLink(newFilePath, podName, HostInfo{})
+			if err == nil {
+				//srcDir := strings.Split(newFilePath, "/")
+				paths, _ := filepath.Split(newFilePath)
+				logFilePath = paths + "/" + logFilePath
 			}
-		} else {
-			log.Println("ERROR: disk + logfile must < 85%")
+			if ctx.checkSpace(arg, logFilePath, podName, HostInfo{}) {
+				logFileList := strings.Split(logFilePath, "/")
+				saveFileName := podName + "-"
+				if logFileList[len(logFileList)-1] == "" {
+					saveFileName = saveFileName + logFileList[len(logFileList)-2]
+				} else {
+					saveFileName = saveFileName + logFileList[len(logFileList)-1]
+				}
+				log.Printf("[INFO] Download %v - %v", logFilePath, fmt.Sprintf("%v/%v.log", destDir, saveFileName))
+				isTar := CheckTarCmd(podName, ctx.NS, ctx.Container)
+				err := k8s.CopyFromPod(
+					kubeConfig, clientSet, podName, ctx.NS, logFilePath, destDir, ctx.Container, saveFileName, isTar,
+				)
+				if err != nil {
+					log.Printf("ERROR: %s", err)
+				}
+			} else {
+				log.Println("ERROR: disk + logfile must < 85%")
+			}
 		}
 	}
 }
@@ -243,7 +267,7 @@ func (ctx Log) SSHFile(arg Args, destDir string) {
 		}
 
 		//logPath := newDir + newFilePath
-		logFilePath := ctx.checkFileLink(newFilePath, "", host)
+		_, logFilePath := ctx.checkFileLink(newFilePath, "", host)
 
 		if ctx.checkSpace(arg, logFilePath, "", host) {
 			cli := ssh.SSH{
@@ -268,7 +292,7 @@ func (ctx Log) SSHFile(arg Args, destDir string) {
 }
 
 func (ctx Log) fetchLogFile(arg Args) {
-	// kubectl -n sso cp mariadb-sso-test-ss-0:/workspace/agent  ./agent
+	// ll -n sso cp mariadb-sso-test-ss-0:/workspace/agent  ./agent
 	destDir := fmt.Sprintf("%v/%v", *arg.LogDir, ctx.Name)
 	if _, err := tools.Mkdir(destDir); err != nil {
 		log.Fatalln(err)
@@ -278,11 +302,18 @@ func (ctx Log) fetchLogFile(arg Args) {
 		ctx.K8sFile(arg, destDir)
 	} else if ctx.Type == "ssh" {
 		ctx.SSHFile(arg, destDir)
+	} else if ctx.Type == "kubectl_logs" {
+		err := tools.KubectlLogs(ctx.NS, ctx.Pod, ctx.Container, ctx.Num, destDir)
+		if err != nil {
+			log.Println("[ERROR] " + err.Error())
+			return
+		}
+	} else {
+		log.Println("[ERROR] no support " + ctx.Type)
 	}
-	time.Sleep(2000 * time.Millisecond)
 	err := tools.Compress([]string{destDir}, destDir+".tar.gz")
 	if err != nil {
-		log.Fatalln(err)
+		log.Fatalln("ERROR: ", err)
 	}
 	log.Printf("[INFO] logfile path: %v.tar.gz", destDir)
 
@@ -352,10 +383,7 @@ func (ctx Log) checkSpace(arg Args, logfile, pod string, host HostInfo) bool {
 	diskAll, _ := strconv.ParseInt(diskInfo[0], 10, 64)
 	diskUsed, _ := strconv.ParseInt(diskInfo[1], 10, 64)
 
-	if (fileSize+diskUsed)/diskAll*100 < 85 {
-		return true
-	}
-	return false
+	return (fileSize+diskUsed)/diskAll*100 < 85
 
 }
 
