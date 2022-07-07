@@ -36,6 +36,7 @@ type Args struct {
 	Debug    *bool
 	Limit    *int
 	HostYaml *string
+	ConfYaml *string
 }
 type Log struct {
 	Type        string `yaml:"type"`
@@ -228,17 +229,9 @@ func (ctx Log) K8sFile(arg Args, destDir string) {
 				logFilePath = paths + "/" + logFilePath
 			}
 			if ctx.checkSpace(arg, logFilePath, podName, HostInfo{}) {
-				logFileList := strings.Split(logFilePath, "/")
-				saveFileName := podName + "-"
-				if logFileList[len(logFileList)-1] == "" {
-					saveFileName = saveFileName + logFileList[len(logFileList)-2]
-				} else {
-					saveFileName = saveFileName + logFileList[len(logFileList)-1]
-				}
-				log.Printf("[INFO] Download %v - %v", logFilePath, fmt.Sprintf("%v/%v.log", destDir, saveFileName))
 				isTar := CheckTarCmd(podName, ctx.NS, ctx.Container)
 				err := k8s.CopyFromPod(
-					kubeConfig, clientSet, podName, ctx.NS, logFilePath, destDir, ctx.Container, saveFileName, isTar,
+					kubeConfig, clientSet, podName, ctx.NS, logFilePath, destDir, ctx.Container, isTar,
 				)
 				if err != nil {
 					log.Printf("ERROR: %s", err)
@@ -311,9 +304,9 @@ func (ctx Log) fetchLogFile(arg Args) {
 	} else {
 		log.Println("[ERROR] no support " + ctx.Type)
 	}
-	err := tools.Compress([]string{destDir}, destDir+".tar.gz")
+	err := tools.Compress([]string{destDir}, destDir+".tar.gz", true)
 	if err != nil {
-		log.Fatalln("ERROR: ", err)
+		log.Fatalln("[ERROR] ", err)
 	}
 	log.Printf("[INFO] logfile path: %v.tar.gz", destDir)
 
@@ -478,6 +471,7 @@ func main() {
 	arg.Name = flag.String("n", "", "log name (log1,log2)")
 	arg.LogDir = flag.String("d", "/tmp/logs", "dest logs dir")
 	arg.HostYaml = flag.String("i", "./host.yml", "host.yml")
+	arg.ConfYaml = flag.String("c", "./conf.yml", "conf.yml")
 	arg.Debug = flag.Bool("debug", false, "debug")
 	arg.Limit = flag.Int("limit", 0, "Limit Max Speed: 1MB/s (0=unlimited)")
 	flag.Parse()
@@ -485,7 +479,7 @@ func main() {
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
 	tools.DEBUG = *arg.Debug
 	tools.Limit = *arg.Limit
-	conf, err := ReadYamlConfig("conf.yml")
+	conf, err := ReadYamlConfig(*arg.ConfYaml)
 	if err != nil {
 		log.Fatal(err)
 	}

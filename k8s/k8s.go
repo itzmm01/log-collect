@@ -207,25 +207,43 @@ func unTarAll1(reader io.Reader, destDir string, limit int) error {
 }
 
 // CopyFromPod 从 pod 复制文件到本地
-func CopyFromPod(r *rest.Config, c *kubernetes.Clientset, pod, ns, src, dest, container, fileName string, isTar bool) error {
+func CopyFromPod(r *rest.Config, c *kubernetes.Clientset, pod, ns, srcPathStr, dest, container string, isTar bool) error {
 	reader, outStream := io.Pipe()
-
+	srcPathList := strings.Split(srcPathStr, "/")
+	srcPath := ""
+	srcFile := ""
+	if srcPathList[len(srcPathList)-1] == "" {
+		srcPath = strings.Join(srcPathList[0:len(srcPathList)-2], "/")
+		srcFile = srcPathList[len(srcPathList)-2]
+	} else {
+		srcPath = strings.Join(srcPathList[0:len(srcPathList)-1], "/")
+		srcFile = srcPathList[len(srcPathList)-1]
+	}
 	var cmd []string
 	if isTar {
-		cmd = []string{"tar", "cf", "-", src, "--warning=no-file-changed"}
+		cmd = []string{"tar", "cf", "-", srcPathStr, "--warning=no-file-changed"}
 	} else {
-		logFileList := strings.Split(src, "/")
-		if logFileList[len(logFileList)-1] == "" {
-			cmd := "ls " + src
+		if srcPathList[len(srcPathList)-1] == "" {
+			cmd := "ls " + srcPathStr
 			res, err := Exec(r, c, pod, ns, cmd, container)
 			if err != nil {
 				return &tools.NewError{Msg: res}
 			}
-			msg := "There is no tar command in the container. Directories are not supported: " + src
+			msg := "There is no tar command in the container. Directories are not supported: " + srcPathStr
 			return &tools.NewError{Msg: msg}
 		}
-		cmd = []string{"cat", src}
+		cmd = []string{"cat", srcPathStr}
 	}
+	destPath := dest + "/" + pod
+	tools.Mkdir(destPath)
+	var destFile string
+	if cmd[0] == "cat" {
+		destFile = destPath + "/" + srcFile
+	} else {
+		destFile = destPath + "/" + srcFile + ".tar.gz"
+	}
+	msg := fmt.Sprintf("[INFO] Download %s/%s %s", srcPath, srcFile, destFile)
+	log.Println(msg)
 	// 初始化pod所在的 coreV1 资源组，发送请求
 	req := c.CoreV1().RESTClient().Get().
 		Resource("pods").
@@ -261,16 +279,6 @@ func CopyFromPod(r *rest.Config, c *kubernetes.Clientset, pod, ns, src, dest, co
 		}
 	}()
 
-	prefix := getPrefix(src)
-	prefix = path.Clean(prefix)
-	prefix = stripPathShortcuts(prefix)
-	destPath := path.Join(dest, fileName)
-	var destFile string
-	if cmd[0] == "cat" {
-		destFile = destPath + ".log"
-	} else {
-		destFile = destPath + ".tar.gz"
-	}
 	err = tools.LimitDownload(reader, destFile)
 	if err != nil {
 		return err

@@ -164,19 +164,41 @@ func LimitDownload(reader io.Reader, destDir string) error {
 func DeleteDir(localPath string) {
 	dir, _ := ioutil.ReadDir(localPath)
 	for _, d := range dir {
-		os.RemoveAll(path.Join([]string{localPath, d.Name()}...))
+		err := os.RemoveAll(path.Join([]string{localPath, d.Name()}...))
+		if err != nil {
+		}
 	}
-	os.RemoveAll(localPath)
+	err := os.RemoveAll(localPath)
+	if err != nil {
+	}
 }
 
 // Compress Compress tar.gz
-func Compress(files []string, dest string) error {
+func Compress(files []string, dest string, isTar bool) error {
+	if isTar == false {
+		return nil
+	}
 	d, _ := os.Create(dest)
-	defer d.Close()
+	defer func(d *os.File) {
+		err := d.Close()
+		if err != nil {
+
+		}
+	}(d)
 	gw := gzip.NewWriter(d)
-	defer gw.Close()
+	defer func(gw *gzip.Writer) {
+		err := gw.Close()
+		if err != nil {
+
+		}
+	}(gw)
 	tw := tar.NewWriter(gw)
-	defer tw.Close()
+	defer func(tw *tar.Writer) {
+		err := tw.Close()
+		if err != nil {
+
+		}
+	}(tw)
 	for _, file := range files {
 		srcFile, _ := os.Open(file)
 		err := compress(srcFile, "", tw)
@@ -230,7 +252,10 @@ func compress(file *os.File, prefix string, tw *tar.Writer) error {
 
 		//_, err = io.Copy(tw, file)
 		_, err = io.Copy(tw, ratelimit.Reader(file, bucket))
-		file.Close()
+		if err != nil {
+			return err
+		}
+		err = file.Close()
 		if err != nil {
 			return err
 		}
@@ -244,12 +269,22 @@ func DeCompress(tarFile, dest string) error {
 	if err != nil {
 		return err
 	}
-	defer srcFile.Close()
+	defer func(srcFile *os.File) {
+		err := srcFile.Close()
+		if err != nil {
+
+		}
+	}(srcFile)
 	gr, err := gzip.NewReader(srcFile)
 	if err != nil {
 		return err
 	}
-	defer gr.Close()
+	defer func(gr *gzip.Reader) {
+		err := gr.Close()
+		if err != nil {
+
+		}
+	}(gr)
 	tr := tar.NewReader(gr)
 	for {
 		hdr, err := tr.Next()
